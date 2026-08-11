@@ -102,19 +102,10 @@ class PotokenExtractor:
             self._extraction_done.clear()
             try:
                 browser = await nodriver.start(headless=False,
+                                               no_sandbox=True,
                                                browser_executable_path=self.browser_path,
                                                user_data_dir=self.profile_path)
             except FileNotFoundError as e:
-                msg = "could not find Chromium. Make sure it's installed or provide direct path to the executable"
-                raise FileNotFoundError(msg) from e
-            tab = browser.main_tab
-            tab.add_handler(nodriver.cdp.network.RequestWillBeSent, self._send_handler)
-            await tab.get('https://www.youtube.com/embed/jNQXAC9IVRw')
-            player_clicked = await self._click_on_player(tab)
-            if player_clicked:
-                await self._wait_for_handler()
-            await tab.close()
-            browser.stop()
 
     @staticmethod
     async def _click_on_player(tab: nodriver.Tab) -> bool:
