@@ -116,11 +116,44 @@ class PotokenExtractor:
 
             await tab.get('https://www.youtube.com/embed/jNQXAC9IVRw')
             player_clicked = await self._click_on_player(tab)
+
+            success = False
             if player_clicked:
-                await self._wait_for_handler()
+                success = await self._wait_for_handler()
+
+            # DEBUG: kalau gagal (timeout / player gak ketemu), intip isi
+            # halaman via JS eval -- ini kasih tahu APAKAH ada consent wall,
+            # bot-check wall, atau player memang gak pernah mulai muter.
+            # Log ini yang perlu di-screenshot/paste balik buat konfirmasi
+            # penyebab pastinya sebelum nulis fix lanjutan.
+            if not success:
+                await self._log_page_diagnostic(tab)
 
             await tab.close()
             browser.stop()
+
+    @staticmethod
+    async def _log_page_diagnostic(tab: nodriver.Tab) -> None:
+        try:
+            diagnostic = await tab.evaluate("""
+                (() => {
+                    const bodyText = (document.body && document.body.innerText) || '';
+                    const player = document.querySelector('#movie_player');
+                    return JSON.stringify({
+                        title: document.title,
+                        url: location.href,
+                        hasConsentText: /consent|before you continue|i agree|accept all/i.test(bodyText),
+                        hasBotCheckText: /sign in to confirm|not a bot|verify you.re human/i.test(bodyText),
+                        hasAgeGateText: /age.restrict|confirm your age/i.test(bodyText),
+                        playerClasses: player ? player.className : null,
+                        playerDataState: player ? player.getAttribute('data-state') : null,
+                        bodyTextSnippet: bodyText.slice(0, 400)
+                    });
+                })()
+            """)
+            logger.warning(f'[diagnostic] page state at failure: {diagnostic}')
+        except Exception as e:
+            logger.warning(f'[diagnostic] failed to evaluate page state: {type(e)}, {e}')
 
     @staticmethod
     async def _click_on_player(tab: nodriver.Tab) -> bool:
