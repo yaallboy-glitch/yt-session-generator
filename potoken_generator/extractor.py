@@ -26,7 +26,6 @@ class TokenInfo:
 
 
 class PotokenExtractor:
-
     def __init__(self, loop: asyncio.AbstractEventLoop,
                  update_interval: float = 3600,
                  browser_path: Optional[Path] = None) -> None:
@@ -65,6 +64,7 @@ class PotokenExtractor:
         if self._update_requested.is_set():
             logger.debug('force update has already been requested')
             return False
+
         self._loop.call_soon_threadsafe(self._update_requested.set)
         logger.debug('force update requested')
         return True
@@ -79,6 +79,7 @@ class PotokenExtractor:
         except (json.JSONDecodeError, TypeError, KeyError) as e:
             logger.warning(f'failed to extract token from request: {type(e)}, {e}')
             return None
+
         token_info = TokenInfo(
             updated=int(time.time()),
             potoken=potoken,
@@ -100,12 +101,26 @@ class PotokenExtractor:
         async with self._ongoing_update:
             logger.info('update started')
             self._extraction_done.clear()
+
             try:
                 browser = await nodriver.start(headless=False,
                                                no_sandbox=True,
                                                browser_executable_path=self.browser_path,
                                                user_data_dir=self.profile_path)
             except FileNotFoundError as e:
+                msg = "could not find Chromium. Make sure it's installed or provide direct path to the executable"
+                raise FileNotFoundError(msg) from e
+
+            tab = browser.main_tab
+            tab.add_handler(nodriver.cdp.network.RequestWillBeSent, self._send_handler)
+
+            await tab.get('https://www.youtube.com/embed/jNQXAC9IVRw')
+            player_clicked = await self._click_on_player(tab)
+            if player_clicked:
+                await self._wait_for_handler()
+
+            await tab.close()
+            browser.stop()
 
     @staticmethod
     async def _click_on_player(tab: nodriver.Tab) -> bool:
@@ -133,9 +148,11 @@ class PotokenExtractor:
             return
         if '/youtubei/v1/player' not in event.request.url:
             return
+
         token_info = self._extract_token(event.request)
         if token_info is None:
             return
+
         logger.info(f'new token: {token_info.to_json()}')
         self._token_info = token_info
         self._extraction_done.set()
